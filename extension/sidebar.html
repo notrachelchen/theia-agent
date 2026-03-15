@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blind Browser Assistant</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #f0f0f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      letter-spacing: -0.3px;
+    }
+
+    #status {
+      font-size: 13px;
+      color: #888;
+      min-height: 18px;
+    }
+
+    #status.listening { color: #4ade80; }
+    #status.thinking  { color: #facc15; }
+    #status.speaking  { color: #60a5fa; }
+    #status.error     { color: #f87171; }
+
+    #log {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 4px 0;
+    }
+
+    .log-entry {
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 8px 10px;
+      border-radius: 8px;
+    }
+
+    .log-entry.user {
+      background: #1e3a5f;
+      color: #93c5fd;
+      align-self: flex-end;
+      max-width: 85%;
+    }
+
+    .log-entry.agent {
+      background: #1a1a1a;
+      color: #d1d5db;
+      align-self: flex-start;
+      max-width: 95%;
+      border: 1px solid #2a2a2a;
+    }
+
+    .log-entry.error {
+      background: #3b1a1a;
+      color: #f87171;
+    }
+
+    #controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #mic-btn {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      background: #1d4ed8;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    #mic-btn:hover  { background: #2563eb; }
+    #mic-btn.active { background: #dc2626; }
+    #mic-btn:disabled { background: #374151; cursor: not-allowed; }
+
+    #text-input-row {
+      display: flex;
+      gap: 6px;
+    }
+
+    #text-input {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #2a2a2a;
+      background: #1a1a1a;
+      color: #f0f0f0;
+      font-size: 13px;
+    }
+
+    #text-input:focus {
+      outline: none;
+      border-color: #1d4ed8;
+    }
+
+    #send-btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: none;
+      background: #1d4ed8;
+      color: white;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    #describe-btn {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #2a2a2a;
+      background: transparent;
+      color: #9ca3af;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    #describe-btn:hover { background: #1a1a1a; color: #f0f0f0; }
+
+    .dot-pulse {
+      display: inline-flex;
+      gap: 3px;
+      align-items: center;
+    }
+
+    .dot-pulse span {
+      width: 4px; height: 4px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+    .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes pulse {
+      0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+      40% { opacity: 1; transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Blind Browser Assistant</h1>
+  <div id="status">Ready</div>
+
+  <div id="log"></div>
+
+  <div id="controls">
+    <button id="mic-btn" aria-label="Hold to speak">
+      🎤 Hold to speak
+    </button>
+
+    <div id="text-input-row">
+      <input
+        type="text"
+        id="text-input"
+        placeholder="Or type a command..."
+        aria-label="Type a command"
+      />
+      <button id="send-btn" aria-label="Send">Send</button>
+    </div>
+
+    <button id="describe-btn">Describe current page</button>
+  </div>
+
+  <script src="sidebar.js"></script>
+</body>
+</html>

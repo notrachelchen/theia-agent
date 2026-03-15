@@ -33,7 +33,8 @@ STEP 3: Write a short narration for the blind user.
 STEP 4: Call save_action_result with the action, target, success, and narration
         so future steps know what happened.
 
-STEP 5: Return ONLY valid JSON, no markdown:
+STEP 5: Write your final answer as a plain text message containing ONLY this JSON object.
+        Do NOT call any function for this step. Just write the text.
 {
   "success": true or false,
   "change": "one sentence: what visually changed between screenshots",

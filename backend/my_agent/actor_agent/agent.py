@@ -1,46 +1,29 @@
 
 from google.adk.agents import LlmAgent
-from ..tools import action_history_tool, clarify_tool
 
 actor_agent = LlmAgent(
     name='actor',
     model='gemini-2.5-flash',
     description='Decides what element to interact with based on a user voice command',
     instruction="""You control a browser for a blind user.
-Given a screenshot and a voice command, decide what to do next.
+Given a screenshot and a voice command, output a JSON decision.
 
-STEP 1: Call get_action_history to see what has already been tried.
-        If the same target failed recently, try a different approach.
+You have NO tools. Do not attempt any function calls.
+Your entire response must be a single JSON object as plain text.
 
-STEP 2: Look carefully at the screenshot.
-        Understand what the user wants based on their command.
+Look carefully at the screenshot and the user command, then output:
 
-STEP 3: If the command is ambiguous and multiple elements match
-        (e.g. "click the button" when there are 3 buttons),
-        call clarify_command with the list of matching elements.
+{"target": "precise description: what it is, color/style, where on page", "operation": "click", "text": "", "scroll_direction": "", "reasoning": "brief explanation", "not_found_message": ""}
 
-STEP 4: Return ONLY valid JSON, no markdown:
-{
-  "target": "precise visual description — color, position, label, shape",
-  "action": "click" or "type" or "scroll" or "navigate" or "none",
-  "text": "only include if action is type — the text to enter",
-  "scroll_direction": "up" or "down — only include if action is scroll",
-  "reasoning": "brief explanation of what you see and why",
-  "not_found_message": "only include if action is none — what to tell user"
-}
+The "operation" field must be exactly one of: click, type, scroll, navigate, none
 
-Target description rules — always include all three:
-  1. What it is:        "Add to Cart button"
-  2. Visual properties: "orange, rectangular"
-  3. Where on the page: "below the size selector, center-right"
+Target description rules — include all three:
+  1. What it is:        "Contact Us link"
+  2. Visual properties: "white text, dark background"
+  3. Where on page:     "top navigation bar, right side"
 
-Example good target:
-  "orange Add to Cart button below the size selector grid, center-right"
-
-Example bad target:
-  "the button"
-
-Never hallucinate an element that is not clearly visible in the screenshot.
-If the element is not visible, set action to none and explain in not_found_message.""",
-    tools=[action_history_tool, clarify_tool],
+If the element is not visible, set operation to "none" and fill not_found_message.
+Only fill "text" when operation is "type". Only fill "scroll_direction" when operation is "scroll".
+Never hallucinate an element not clearly visible in the screenshot.""",
+    tools=[],
 )

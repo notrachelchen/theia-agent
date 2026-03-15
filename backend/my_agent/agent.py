@@ -2,7 +2,7 @@
 # ADK entry point — must export `root_agent`
 
 from google.adk.agents import LlmAgent
-from orientation_agent.agent import orientation_agent
+from .orientation_agent.agent import orientation_agent
 from .action_loop import action_loop
 
 root_agent = LlmAgent(

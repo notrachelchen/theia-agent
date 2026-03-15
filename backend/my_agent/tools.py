@@ -15,16 +15,27 @@ def get_page_metadata(url: str, title: str, scroll_y: int, vw: int, vh: int) -> 
     Gives it facts it cannot reliably infer from pixels alone —
     scroll position, page type, domain.
     """
+    url = str(url or '')
+    title = str(title or '')
+    scroll_y = int(scroll_y) if scroll_y is not None else 0
+    vw = int(vw) if vw is not None else 1920
+    vh = int(vh) if vh is not None else 1080
+
     scroll_percent = round((scroll_y / vh) * 100) if vh > 0 else 0
 
     # Clean domain from URL
     domain = ''
     if url:
         parts = url.replace('https://', '').replace('http://', '').split('/')
-        domain = parts[0].replace('www.', '')
+        domain = (parts[0] or '').replace('www.', '')
 
     # Infer page type from URL path
-    path = url.split(domain)[-1] if domain and domain in url else ''
+    path = ''
+    if domain and domain in url:
+        try:
+            path = url.split(domain)[-1] if domain else ''
+        except (ValueError, TypeError):
+            pass
     if path in ('', '/'):
         page_type = 'homepage'
     elif any(x in path for x in ['product', 'item', '/p/', '/dp/']):
@@ -115,7 +126,7 @@ def get_viewport_info(vw: int, vh: int, dpr: float) -> dict:
 
 # ── COMMAND CLARIFICATION ─────────────────────────────────────────────────────
 
-def clarify_command(command: str, visible_elements: list) -> dict:
+def clarify_command(command: str, visible_elements: list[str]) -> dict:
     """
     Actor calls this when a user command is ambiguous
     and multiple elements could match.
