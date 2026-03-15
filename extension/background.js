@@ -12,7 +12,13 @@ chrome.action.onClicked.addListener((tab) => {
 const BACKEND = 'http://localhost:8000';
 const APP_NAME = 'my_agent';
 const USER_ID = 'user';
-const SESSION_ID = 'session_1';
+
+// Each command gets a fresh session so ADK always starts from the root agent.
+// Without this, ADK keeps the last active sub-agent as the entry point for
+// the next call, causing action tasks to be handled by orientation and vice versa.
+function newSessionId() {
+  return 'session_' + Date.now();
+}
 
 // ── PAGE LOAD TRIGGERS ──────────────────────────────────────────────────────
 
@@ -54,13 +60,14 @@ async function triggerOrientation(tabId, tab) {
     const capture = await captureWithMeta(tabId);
 
     const result = await callBackend(
-      `orientation task. Page just loaded.
-       Title: ${tab.title}.
-       URL: ${tab.url}.
-       Viewport: ${capture.vw}x${capture.vh}.
-       ScrollY: ${capture.scrollY}.
-       DPR: ${capture.dpr}`,
-      capture.base64
+      `orientation task. Page just loaded.` +
+      ` Title: ${tab.title}.` +
+      ` URL: ${tab.url}.` +
+      ` Viewport: ${capture.vw}x${capture.vh}.` +
+      ` ScrollY: ${capture.scrollY}.` +
+      ` DPR: ${capture.dpr}`,
+      capture.base64,
+      newSessionId()
     );
 
     const description = extractSpeakableText(result);
@@ -154,38 +161,61 @@ async function handleUserCommand(command, tabId) {
         ` ScrollY: ${capture.scrollY}`;
     }
 
-    // Send to ADK backend
-    const result = await callBackend(prompt, capture.base64);
+    // Each command gets its own session so ADK always starts from the root agent
+    const sessionId = newSessionId();
+    const result = await callBackend(prompt, capture.base64, sessionId);
 
     // Check if grounder found and located the element
-    const grounderData = extractJSON(result);
+    const grounderData = extractGrounderData(result);
     const actorData    = extractActorJSON(result);
 
-    if (grounderData && grounderData.found === true && grounderData.css_x && grounderData.css_y) {
+    // ── SCROLL ──────────────────────────────────────────────────────────────
+    if (actorData?.operation === 'scroll') {
+      const dir = (actorData.scroll_direction || 'down').toLowerCase();
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: (d) => {
+          const amount = d === 'up' ? -600 : 600;
+          window.scrollBy({ top: amount, left: 0, behavior: 'smooth' });
+        },
+        args: [dir]
+      });
+      await sleep(800);
+      await postActionOrientation(activeTab.id, command);
+      return { success: true };
+    }
+
+    // ── NAVIGATE ────────────────────────────────────────────────────────────
+    if (actorData?.operation === 'navigate' && actorData.text) {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: (url) => { window.location.href = url; },
+        args: [actorData.text]
+      });
+      await sleep(1500);
+      await postActionOrientation(activeTab.id, command);
+      return { success: true };
+    }
+
+    // Compute CSS coordinates from box_2d — do the math here, not in the model
+    let css_x = null, css_y = null;
+    if (grounderData && grounderData.found === true && grounderData.box_2d) {
+      const [ymin, xmin, ymax, xmax] = grounderData.box_2d;
+      css_x = (xmin + xmax) / 2 / 1000 * capture.vw;
+      css_y = (ymin + ymax) / 2 / 1000 * capture.vh;
+    }
+
+    if (css_x !== null && css_y !== null && (css_x > 0 || css_y > 0)) {
       // Execute the click in the content script
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-      await executeClick(activeTab.id, grounderData.css_x, grounderData.css_y);
+      await executeClick(activeTab.id, css_x, css_y);
 
       // Small wait for page to react
       await sleep(600);
-
-      // Take fresh screenshot for post-action orientation
-      const afterCapture = await captureWithMeta(activeTab.id);
-      const afterTab = await chrome.tabs.get(activeTab.id);
-
-      const orientResult = await callBackend(
-        `orientation task. Action just completed: "${command}".` +
-        ` Describe what changed and current page state.` +
-        ` Title: ${afterTab.title}.` +
-        ` URL: ${afterTab.url}.` +
-        ` Viewport: ${afterCapture.vw}x${afterCapture.vh}.` +
-        ` ScrollY: ${afterCapture.scrollY}`,
-        afterCapture.base64
-      );
-
-      const orientText = extractSpeakableText(orientResult);
-      if (orientText) await speak(orientText);
+      await postActionOrientation(activeTab.id, command);
 
     } else {
       // Element not found or orientation response — speak feedback
@@ -203,28 +233,45 @@ async function handleUserCommand(command, tabId) {
   }
 }
 
+async function postActionOrientation(tabId, command) {
+  const afterCapture = await captureWithMeta(tabId);
+  const afterTab = await chrome.tabs.get(tabId);
+  const orientResult = await callBackend(
+    `orientation task. Action just completed: "${command}".` +
+    ` Describe what changed and current page state.` +
+    ` Title: ${afterTab.title}.` +
+    ` URL: ${afterTab.url}.` +
+    ` Viewport: ${afterCapture.vw}x${afterCapture.vh}.` +
+    ` ScrollY: ${afterCapture.scrollY}`,
+    afterCapture.base64,
+    newSessionId()
+  );
+  const orientText = extractSpeakableText(orientResult);
+  if (orientText) await speak(orientText);
+}
+
 // ── ADK BACKEND CALL ────────────────────────────────────────────────────────
 
-async function ensureSession() {
+async function ensureSession(sessionId) {
   const res = await fetch(
-    `${BACKEND}/apps/${APP_NAME}/users/${USER_ID}/sessions/${SESSION_ID}`,
+    `${BACKEND}/apps/${APP_NAME}/users/${USER_ID}/sessions/${sessionId}`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
   );
-  if (res.ok || res.status === 409) return; // 409 = session already exists
+  if (res.ok || res.status === 409) return;
   if (res.status === 400) {
     const body = await res.json().catch(() => ({}));
-    if (String(body.detail || '').includes('already exists')) return; // ADK returns 400 for existing session
+    if (String(body.detail || '').includes('already exists')) return;
   }
   if (!res.ok) throw new Error(`Session create failed: ${res.status}`);
 }
 
-async function callBackend(message, base64Image) {
-  await ensureSession();
+async function callBackend(message, base64Image, sessionId) {
+  await ensureSession(sessionId);
 
   const body = {
     app_name: APP_NAME,
     user_id: USER_ID,
-    session_id: SESSION_ID,
+    session_id: sessionId,
     new_message: {
       role: 'user',
       parts: []
@@ -333,7 +380,7 @@ function extractSpeakableText(result) {
   }
 }
 
-function extractJSON(result) {
+function extractGrounderData(result) {
   const events = Array.isArray(result) ? result : result?.events;
   if (!events) return null;
   const textParts = events
@@ -341,13 +388,13 @@ function extractJSON(result) {
     .flatMap(e => e.content.parts)
     .filter(p => p.text)
     .map(p => p.text);
-  // Find the grounder's output — identified by having css_x/css_y fields
+  // Find the grounder's output — identified by having a box_2d array and found field
   for (const text of textParts) {
     try {
       const match = text.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);
-        if (parsed.css_x !== undefined && parsed.css_y !== undefined) return parsed;
+        if (parsed.found !== undefined && Array.isArray(parsed.box_2d)) return parsed;
       }
     } catch (e) {}
   }

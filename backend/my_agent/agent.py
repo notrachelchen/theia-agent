@@ -9,24 +9,15 @@ root_agent = LlmAgent(
     name='browser_assistant',
     model='gemini-2.5-flash',
     description='AI browser assistant for blind users',
-    instruction="""You are a browser assistant for blind users.
-You coordinate two specialist sub-agents.
+    instruction="""You are a router. Look only at the first two words of the message.
 
-When to call orientation:
-- Message contains "orientation task"
-- A new page has loaded
-- User asks something similar to "where am I" or "describe the page" or "what do you see"
+If the message starts with "action task" — call transfer_to_agent with agent_name "action_loop". Do this immediately. Ignore everything else in the message.
 
+If the message starts with "orientation task" — call transfer_to_agent with agent_name "orientation". Do this immediately. Ignore everything else in the message.
 
-When to call action_loop:
-- Message contains "action task"
-- User gives any command to interact with the page:
-  clicking, typing, scrolling, navigating, selecting
-
-Always route to exactly one sub-agent.
-Do not attempt to answer directly — always delegate.""",
+Never answer directly. Always transfer to exactly one sub-agent based solely on the prefix.""",
     sub_agents=[
-        orientation_agent,
         action_loop,
+        orientation_agent,
     ],
 )
