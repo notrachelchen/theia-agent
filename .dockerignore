@@ -1,0 +1,8 @@
+.env
+.env.*
+extension/
+backend/my_agent/venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.git/

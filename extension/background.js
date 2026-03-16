@@ -9,7 +9,7 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ windowId: tab.windowId });
 });
 
-const BACKEND = 'http://localhost:8000';
+const BACKEND = 'https://theia-agent-141554585243.us-central1.run.app';
 const APP_NAME = 'my_agent';
 const USER_ID = 'user';
 
