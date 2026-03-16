@@ -244,14 +244,89 @@ async function handleUserCommand(command, tabId) {
     if (css_x !== null && css_y !== null && (css_x > 0 || css_y > 0)) {
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-      // Repeat the click `repeatCount` times (e.g. clicking "+" 3 times to reach qty 4)
-      for (let i = 0; i < repeatCount; i++) {
-        if (i > 0) await sleep(400); // let the page update between clicks
-        await executeClick(activeTab.id, css_x, css_y);
-      }
+      // ── TYPE ──────────────────────────────────────────────────────────────
+      if (actorData?.operation === 'type' && actorData.text) {
+        const targetText = actorData.text;
+        let typed = false;
 
-      await sleep(600);
-      await postActionOrientation(activeTab.id, command);
+        for (let attempt = 1; attempt <= 3 && !typed; attempt++) {
+          if (attempt > 1) await sleep(600);
+
+          const [{ result }] = await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            world: 'MAIN',   // run in page context so React/Vue prototype patches are visible
+            func: (x, y, text) => {
+              // Find element at grounder coordinates
+              const el = document.elementFromPoint(x, y);
+              if (!el) return { ok: false, reason: 'no element at point' };
+
+              // Walk up to nearest focusable field
+              const field = el.closest('input, textarea, [contenteditable]') || el;
+              field.focus();
+              field.click();
+
+              if (field.tagName === 'INPUT' || field.tagName === 'TEXTAREA') {
+                // 1. Clear then use execCommand — best for React synthetic events
+                field.select();
+                const ok1 = document.execCommand('selectAll', false)
+                         && document.execCommand('insertText', false, text);
+                if (ok1 && field.value === text) {
+                  return { ok: true, method: 'execCommand', value: field.value };
+                }
+
+                // 2. Native prototype setter — triggers React's internal tracker
+                const proto = field.tagName === 'INPUT'
+                  ? window.HTMLInputElement.prototype
+                  : window.HTMLTextAreaElement.prototype;
+                const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                if (nativeSetter) nativeSetter.call(field, text);
+                else field.value = text;
+                field.dispatchEvent(new Event('input',  { bubbles: true }));
+                field.dispatchEvent(new Event('change', { bubbles: true }));
+                if (field.value === text) {
+                  return { ok: true, method: 'nativeSetter', value: field.value };
+                }
+
+                // 3. Plain assignment fallback
+                field.value = text;
+                field.dispatchEvent(new Event('input',  { bubbles: true }));
+                field.dispatchEvent(new Event('change', { bubbles: true }));
+                return { ok: field.value === text, method: 'direct', value: field.value };
+              }
+
+              if (field.isContentEditable) {
+                field.focus();
+                document.execCommand('selectAll', false);
+                document.execCommand('insertText', false, text);
+                const actual = field.textContent.trim();
+                return { ok: actual === text.trim(), method: 'contenteditable', value: actual };
+              }
+
+              return { ok: false, reason: `unsupported element: ${field.tagName}` };
+            },
+            args: [css_x, css_y, targetText]
+          });
+
+          typed = result?.ok === true;
+          console.log(`[type] attempt ${attempt}:`, result);
+        }
+
+        await sleep(400);
+        if (typed) {
+          await postActionOrientation(activeTab.id, command);
+        } else {
+          await speak(`I wasn't able to type into that field after 3 tries. Please try repositioning or try again.`);
+        }
+
+      } else {
+        // ── CLICK (repeated) ──────────────────────────────────────────────
+        for (let i = 0; i < repeatCount; i++) {
+          if (i > 0) await sleep(400);
+          await executeClick(activeTab.id, css_x, css_y);
+        }
+        await sleep(600);
+        await postActionOrientation(activeTab.id, command);
+      }
 
     } else {
       // Element not found or orientation response — speak feedback

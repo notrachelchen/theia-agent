@@ -21,6 +21,8 @@ Examples:
   → Click "+" 2 times. Set count: 2.
 - User says "click the home button"
   → One click. Set count: 1.
+- User says "the email field should be john@example.com" or "type john@example.com in the email box"
+  → operation: "type", text: "john@example.com", target: the email input field.
 - User says "scroll down 3 times"
   → Set operation: "scroll", scroll_direction: "down", count: 3.
 
@@ -30,7 +32,13 @@ Examples:
 Field rules:
 - "operation" must be exactly one of: click, type, scroll, navigate, none
 - "count" — integer, how many times to perform the action. Default 1. Required for repeated clicks/scrolls.
-- "text" — only fill when operation is "type"
+- "text" — ONLY fill when operation is "type". Must contain the EXACT string to type into the field.
+    Extract it precisely from the user's command:
+    "type john@example.com in the email field"  → text: "john@example.com"
+    "the email should be john@example.com"       → text: "john@example.com"
+    "enter my name as John Smith"                → text: "John Smith"
+    "put 42 Main Street in the address box"      → text: "42 Main Street"
+    Strip instructions like "type", "enter", "put", "fill in", "should be" — keep only the value.
 - "scroll_direction" — only fill when operation is "scroll": "up" or "down"
 - "reasoning" — always explain current state vs target state so count is justified
 
