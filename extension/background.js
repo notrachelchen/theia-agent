@@ -13,6 +13,8 @@ const BACKEND = 'http://localhost:8000';
 const APP_NAME = 'my_agent';
 const USER_ID = 'user';
 
+const TTS_SAMPLE_RATE = 24000;
+
 // Each command gets a fresh session so ADK always starts from the root agent.
 // Without this, ADK keeps the last active sub-agent as the entry point for
 // the next call, causing action tasks to be handled by orientation and vice versa.
@@ -334,20 +336,57 @@ async function captureWithMeta(tabId) {
 
   return { base64, ...result };
 }
-// ── TTS ─────────────────────────────────────────────────────────────────────
+// ── TTS (Gemini) ─────────────────────────────────────────────────────────────
 
-function speak(text) {
-  return new Promise(resolve => {
-    chrome.tts.stop();
-    chrome.tts.speak(text, {
-      rate: 1.1,
-      pitch: 1.0,
-      volume: 1.0,
-      onEvent: (e) => {
-        if (e.type === 'end' || e.type === 'error') resolve();
-      }
+async function speak(text) {
+  try {
+    const { base64, mimeType } = await fetchTTS(text);
+    await ensureOffscreen();
+    // offscreen.js stops any current audio before playing new audio
+    await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'PLAY_AUDIO', base64, mimeType, sampleRate: TTS_SAMPLE_RATE },
+        (resp) => {
+          if (chrome.runtime.lastError) {
+            console.error('[TTS] sendMessage error:', chrome.runtime.lastError.message);
+          } else {
+            console.log('[TTS] playback response:', resp);
+          }
+          resolve();
+        }
+      );
     });
+  } catch (err) {
+    console.error('TTS error:', err);
+  }
+}
+
+async function fetchTTS(text) {
+  // Proxied through the local backend — API key stays in .env, never in extension
+  const res = await fetch(`${BACKEND}/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
   });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`TTS error ${res.status}: ${err}`);
+  }
+  const data = await res.json();
+  return { base64: data.audioContent, mimeType: data.mimeType || 'audio/pcm' };
+}
+
+async function ensureOffscreen() {
+  const existing = await chrome.offscreen.hasDocument();
+  if (!existing) {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['AUDIO_PLAYBACK'],
+      justification: 'Play Gemini TTS audio for blind user assistant'
+    });
+    // Wait for the page to load and register its message listener
+    await sleep(300);
+  }
 }
 
 // ── HELPERS ─────────────────────────────────────────────────────────────────
