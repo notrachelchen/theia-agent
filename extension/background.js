@@ -178,7 +178,34 @@ async function handleUserCommand(command, tabId) {
       await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: (d) => {
-          const amount = d === 'up' ? -600 : 600;
+          // Find the next section boundary below (or above) the current viewport edge
+          const viewportH = window.innerHeight;
+          const currentY  = window.scrollY;
+          const direction = d === 'up' ? -1 : 1;
+
+          // Look for a heading or section element just past the viewport edge
+          const candidates = Array.from(
+            document.querySelectorAll('section, article, [id], h1, h2, h3, h4, nav, header, footer, main')
+          );
+          let target = null;
+          if (direction === 1) {
+            // scrolling down: find first element whose top is below the current bottom edge
+            const bottomEdge = currentY + viewportH;
+            for (const el of candidates) {
+              const top = el.getBoundingClientRect().top + currentY;
+              if (top > bottomEdge + 10) { target = top; break; }
+            }
+          } else {
+            // scrolling up: find last element whose top is above the current top edge
+            const topEdge = currentY;
+            for (const el of [...candidates].reverse()) {
+              const top = el.getBoundingClientRect().top + currentY;
+              if (top < topEdge - 10) { target = top; break; }
+            }
+          }
+
+          // Fall back to one full viewport height if no section found
+          const amount = target !== null ? target - currentY : direction * viewportH;
           window.scrollBy({ top: amount, left: 0, behavior: 'smooth' });
         },
         args: [dir]
