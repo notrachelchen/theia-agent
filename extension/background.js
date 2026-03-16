@@ -171,10 +171,14 @@ async function handleUserCommand(command, tabId) {
     const grounderData = extractGrounderData(result);
     const actorData    = extractActorJSON(result);
 
+    const repeatCount = Math.max(1, parseInt(actorData?.count) || 1);
+
     // ── SCROLL ──────────────────────────────────────────────────────────────
     if (actorData?.operation === 'scroll') {
       const dir = (actorData.scroll_direction || 'down').toLowerCase();
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      for (let i = 0; i < repeatCount; i++) {
+        if (i > 0) await sleep(600);
       await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: (d) => {
@@ -210,6 +214,7 @@ async function handleUserCommand(command, tabId) {
         },
         args: [dir]
       });
+      }
       await sleep(800);
       await postActionOrientation(activeTab.id, command);
       return { success: true };
@@ -237,12 +242,14 @@ async function handleUserCommand(command, tabId) {
     }
 
     if (css_x !== null && css_y !== null && (css_x > 0 || css_y > 0)) {
-      // Execute the click in the content script
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-      await executeClick(activeTab.id, css_x, css_y);
+      // Repeat the click `repeatCount` times (e.g. clicking "+" 3 times to reach qty 4)
+      for (let i = 0; i < repeatCount; i++) {
+        if (i > 0) await sleep(400); // let the page update between clicks
+        await executeClick(activeTab.id, css_x, css_y);
+      }
 
-      // Small wait for page to react
       await sleep(600);
       await postActionOrientation(activeTab.id, command);
 
@@ -266,8 +273,10 @@ async function postActionOrientation(tabId, command) {
   const afterCapture = await captureWithMeta(tabId);
   const afterTab = await chrome.tabs.get(tabId);
   const orientResult = await callBackend(
-    `orientation task. Action just completed: "${command}".` +
-    ` Describe what changed and current page state.` +
+    `orientation task. Action was attempted: "${command}".` +
+    ` Look at the screenshot and report ONLY what you actually see — do NOT assume the action succeeded.` +
+    ` If the page shows something different from what was intended, say so explicitly.` +
+    ` What is actually selected, visible, or changed right now?` +
     ` Title: ${afterTab.title}.` +
     ` URL: ${afterTab.url}.` +
     ` Viewport: ${afterCapture.vw}x${afterCapture.vh}.` +
