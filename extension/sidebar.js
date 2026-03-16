@@ -1,66 +1,57 @@
 // sidebar.js — handles voice input, text input, and UI updates
 
-const micBtn      = document.getElementById('mic-btn');
-const textInput   = document.getElementById('text-input');
-const sendBtn     = document.getElementById('send-btn');
-const describeBtn = document.getElementById('describe-btn');
-const statusEl    = document.getElementById('status');
-const logEl       = document.getElementById('log');
+const micBtn         = document.getElementById('mic-btn');
+const textInput      = document.getElementById('text-input');
+const sendBtn        = document.getElementById('send-btn');
+const describeBtn    = document.getElementById('describe-btn');
+const statusEl       = document.getElementById('status');
+const logEl          = document.getElementById('log');
+const liveTranscript = document.getElementById('live-transcript');
 
-let recognition = null;
 let isListening = false;
+let isSpeaking = false;
+let speakingTimer = null;
 
-// ── SPEECH RECOGNITION SETUP ────────────────────────────────────────────────
+// ── MIC CONTROL ─────────────────────────────────────────────────────────────
+// Speech recognition runs in the content script (on the real https:// page)
+// because chrome-extension:// pages are blocked from mic access in MV3.
 
-function setupSpeechRecognition() {
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    setStatus('Voice input not supported in this browser', 'error');
-    micBtn.disabled = true;
-    return;
+function resetSpeaking() {
+  clearTimeout(speakingTimer);
+  speakingTimer = null;
+  isSpeaking = false;
+  setMicDisabled(false);
+  setStatus('Ready', '');
+}
+
+function setMicDisabled(disabled) {
+  // Don't use disabled attribute — we need clicks to work for interruption
+  if (disabled) {
+    micBtn.textContent = '🔇 AI speaking... (tap to stop)';
+    micBtn.classList.remove('active');
+    micBtn.style.opacity = '0.6';
+    micBtn.style.cursor = 'pointer';
+  } else {
+    micBtn.style.opacity = '';
+    micBtn.style.cursor = '';
+    if (!isListening) micBtn.textContent = '🎤 Tap to speak';
   }
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.lang = 'en-US';
-
-  recognition.onstart = () => {
-    isListening = true;
-    micBtn.textContent = '🔴 Listening...';
-    micBtn.classList.add('active');
-    setStatus('Listening...', 'listening');
-  };
-
-  recognition.onresult = (e) => {
-    const command = e.results[0][0].transcript;
-    addLog(command, 'user');
-    processCommand(command);
-  };
-
-  recognition.onerror = (e) => {
-    setStatus(`Voice error: ${e.error}`, 'error');
-    stopListening();
-  };
-
-  recognition.onend = () => {
-    stopListening();
-  };
 }
 
 function startListening() {
-  if (!recognition) return;
-  try {
-    recognition.start();
-  } catch (e) {
-    console.error('Recognition start error:', e);
-  }
+  if (isSpeaking) return;
+  isListening = true;
+  micBtn.textContent = '🎙️ Listening...';
+  micBtn.classList.add('active');
+  setStatus('Listening...', 'listening');
+  chrome.runtime.sendMessage({ type: 'START_LISTENING' });
 }
 
 function stopListening() {
   isListening = false;
-  micBtn.textContent = '🎤 Hold to speak';
+  micBtn.textContent = '🎤 Tap to speak';
   micBtn.classList.remove('active');
+  liveTranscript.textContent = '';
   setStatus('Ready', '');
 }
 
@@ -146,11 +137,21 @@ function hideThinking() {
 
 // ── EVENT LISTENERS ──────────────────────────────────────────────────────────
 
-// Hold to speak
-micBtn.addEventListener('mousedown', startListening);
-micBtn.addEventListener('touchstart', startListening);
-micBtn.addEventListener('mouseup', () => recognition && recognition.stop());
-micBtn.addEventListener('touchend', () => recognition && recognition.stop());
+// Tap to toggle listening; tap while AI speaks to interrupt and re-enable
+micBtn.addEventListener('click', () => {
+  if (isSpeaking) {
+    chrome.tts.stop();
+    chrome.runtime.sendMessage({ type: 'STOP_AUDIO' }).catch(() => {});
+    resetSpeaking();
+    return;
+  }
+  if (isListening) {
+    chrome.runtime.sendMessage({ type: 'STOP_LISTENING' });
+    stopListening();
+  } else {
+    startListening();
+  }
+});
 
 // Text input — send on Enter or button click
 textInput.addEventListener('keydown', (e) => {
@@ -174,7 +175,7 @@ sendBtn.addEventListener('click', () => {
 // Describe page button
 describeBtn.addEventListener('click', describeCurrentPage);
 
-// Listen for agent responses from background.js to log them
+// Listen for messages from background.js
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'AGENT_RESPONSE') {
     hideThinking();
@@ -184,12 +185,38 @@ chrome.runtime.onMessage.addListener((msg) => {
     showThinking();
     setStatus('Thinking...', 'thinking');
   }
-  if (msg.type === 'AGENT_SPEAKING') {
+  if (msg.type === 'AGENT_SPEAKING_START') {
+    isSpeaking = true;
+    setMicDisabled(true);
     setStatus('Speaking...', 'speaking');
+    // Safety timeout — re-enable button if AGENT_SPEAKING_END never arrives
+    clearTimeout(speakingTimer);
+    speakingTimer = setTimeout(() => resetSpeaking(), 30000);
+  }
+  if (msg.type === 'AGENT_SPEAKING_END') {
+    resetSpeaking();
+  }
+
+  // Voice results relayed from content script
+  if (msg.type === 'VOICE_INTERIM') {
+    liveTranscript.textContent = msg.transcript;
+  }
+  if (msg.type === 'VOICE_RESULT') {
+    liveTranscript.textContent = '';
+    stopListening();
+    addLog(msg.transcript, 'user');
+    processCommand(msg.transcript);
+  }
+  if (msg.type === 'VOICE_ERROR') {
+    console.error('[mic] error:', msg.error);
+    setStatus(`Voice error: ${msg.error}`, 'error');
+    stopListening();
+  }
+  if (msg.type === 'VOICE_END') {
+    if (isListening) stopListening();
   }
 });
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
 
-setupSpeechRecognition();
-addLog('Assistant ready. Hold the mic button or type a command.', 'agent');
+addLog('Assistant ready. Tap the mic button or type a command.', 'agent');

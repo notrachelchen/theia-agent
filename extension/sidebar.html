@@ -92,8 +92,8 @@
     }
 
     #mic-btn:hover  { background: #2563eb; }
-    #mic-btn.active { background: #dc2626; }
-    #mic-btn:disabled { background: #374151; cursor: not-allowed; }
+    #mic-btn.active { background: #374151; color: #9ca3af; cursor: default; }
+    #mic-btn:disabled { background: #374151; color: #6b7280; cursor: not-allowed; opacity: 0.7; }
 
     #text-input-row {
       display: flex;
@@ -138,6 +138,16 @@
 
     #describe-btn:hover { background: #1a1a1a; color: #f0f0f0; }
 
+    #live-transcript {
+      min-height: 0;
+      font-size: 13px;
+      color: #4ade80;
+      font-style: italic;
+      padding: 0 2px;
+      transition: opacity 0.15s;
+    }
+    #live-transcript:empty { display: none; }
+
     .dot-pulse {
       display: inline-flex;
       gap: 3px;
@@ -168,9 +178,10 @@
   <div id="log"></div>
 
   <div id="controls">
-    <button id="mic-btn" aria-label="Hold to speak">
-      🎤 Hold to speak
+    <button id="mic-btn" aria-label="Tap to speak">
+      🎤 Tap to speak
     </button>
+    <div id="live-transcript"></div>
 
     <div id="text-input-row">
       <input

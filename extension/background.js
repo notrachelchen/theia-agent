@@ -98,6 +98,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(err => sendResponse({ error: err.message }));
     return true;
   }
+
+  // ── MIC RELAY: sidebar → content script ──────────────────────────────────
+  if (msg.type === 'START_LISTENING' || msg.type === 'STOP_LISTENING') {
+    chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
+      if (!tab) return;
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: msg.type });
+      } catch {
+        // Content script not connected (tab was open before extension loaded) — inject and retry
+        if (msg.type === 'START_LISTENING') {
+          try {
+            await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+            await chrome.tabs.sendMessage(tab.id, { type: 'START_LISTENING' });
+          } catch (e) {
+            console.error('[relay] failed to inject content script:', e);
+            chrome.runtime.sendMessage({ type: 'VOICE_ERROR', error: 'injection-failed' }).catch(() => {});
+          }
+        }
+      }
+    });
+    return false;
+  }
+
 });
 
 // ── USER COMMAND HANDLER ────────────────────────────────────────────────────
@@ -450,25 +473,47 @@ async function captureWithMeta(tabId) {
 // ── TTS (Gemini) ─────────────────────────────────────────────────────────────
 
 async function speak(text) {
+  chrome.runtime.sendMessage({ type: 'AGENT_SPEAKING_START' }).catch(() => {});
   try {
-    const { base64, mimeType } = await fetchTTS(text);
-    await ensureOffscreen();
-    // offscreen.js stops any current audio before playing new audio
-    await new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: 'PLAY_AUDIO', base64, mimeType, sampleRate: TTS_SAMPLE_RATE },
-        (resp) => {
-          if (chrome.runtime.lastError) {
-            console.error('[TTS] sendMessage error:', chrome.runtime.lastError.message);
-          } else {
-            console.log('[TTS] playback response:', resp);
+    let usedGemini = false;
+    try {
+      const { base64, mimeType } = await fetchTTS(text);
+      await ensureOffscreen();
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          { type: 'PLAY_AUDIO', base64, mimeType, sampleRate: TTS_SAMPLE_RATE },
+          (resp) => {
+            if (chrome.runtime.lastError) {
+              console.error('[TTS] sendMessage error:', chrome.runtime.lastError.message);
+            } else {
+              console.log('[TTS] playback response:', resp);
+            }
+            resolve();
           }
-          resolve();
-        }
-      );
-    });
+        );
+      });
+      usedGemini = true;
+    } catch (geminiErr) {
+      console.warn('[TTS] Gemini TTS failed, falling back to speechSynthesis:', geminiErr.message);
+    }
+
+    if (!usedGemini) {
+      // Fallback: chrome.tts is available in the service worker and always resolves
+      await new Promise((resolve) => {
+        chrome.tts.speak(text, {
+          rate: 1.0,
+          onEvent: (event) => {
+            if (event.type === 'end' || event.type === 'error' || event.type === 'cancelled') {
+              resolve();
+            }
+          }
+        });
+      });
+    }
   } catch (err) {
     console.error('TTS error:', err);
+  } finally {
+    chrome.runtime.sendMessage({ type: 'AGENT_SPEAKING_END' }).catch(() => {});
   }
 }
 
@@ -480,8 +525,8 @@ async function fetchTTS(text) {
     body: JSON.stringify({ text })
   });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`TTS error ${res.status}: ${err}`);
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `TTS error ${res.status}`);
   }
   const data = await res.json();
   return { base64: data.audioContent, mimeType: data.mimeType || 'audio/pcm' };

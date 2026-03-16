@@ -1,7 +1,64 @@
 // content.js — injected into every tab
-// Executes clicks, typing, and scrolling on behalf of the agent
+// Executes clicks, typing, scrolling, and speech recognition on behalf of the agent
+
+// Guard against being injected twice (manifest + dynamic injection)
+if (window.__theiaAgent) {
+  // Already loaded — do nothing
+} else {
+window.__theiaAgent = true;
+
+let _recognition = null;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+  // ── SPEECH RECOGNITION ───────────────────────────────────────────────────
+  // Runs here (on the real https:// page) because chrome-extension:// pages
+  // are blocked from mic access in MV3.
+  if (msg.type === 'START_LISTENING') {
+    if (_recognition) { try { _recognition.abort(); } catch(e) {} }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      chrome.runtime.sendMessage({ type: 'VOICE_ERROR', error: 'not-supported' });
+      sendResponse({ ok: false });
+      return true;
+    }
+
+    _recognition = new SR();
+    _recognition.continuous = false;
+    _recognition.interimResults = true;
+    _recognition.lang = 'en-US';
+
+    _recognition.onresult = (e) => {
+      let interim = '';
+      let final = '';
+      for (const result of e.results) {
+        if (result.isFinal) final += result[0].transcript;
+        else interim += result[0].transcript;
+      }
+      if (interim) chrome.runtime.sendMessage({ type: 'VOICE_INTERIM', transcript: interim });
+      if (final)   chrome.runtime.sendMessage({ type: 'VOICE_RESULT', transcript: final });
+    };
+
+    _recognition.onerror = (e) => {
+      chrome.runtime.sendMessage({ type: 'VOICE_ERROR', error: e.error });
+    };
+
+    _recognition.onend = () => {
+      chrome.runtime.sendMessage({ type: 'VOICE_END' });
+      _recognition = null;
+    };
+
+    _recognition.start();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === 'STOP_LISTENING') {
+    if (_recognition) { try { _recognition.stop(); } catch(e) {} }
+    sendResponse({ ok: true });
+    return true;
+  }
 
     // ── CLICK ────────────────────────────────────────────────────────────────
     if (msg.type === 'EXECUTE_CLICK') {
@@ -93,3 +150,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   
     return true; // keep message channel open for async
   });
+
+} // end __theiaAgent guard

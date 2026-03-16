@@ -10,7 +10,10 @@
       "scripting",
       "storage",
       "offscreen",
-      "sidePanel"
+      "sidePanel",
+      "microphone",
+      "audioCapture",
+      "tts"
     ],
   
     "host_permissions": [

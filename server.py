@@ -126,8 +126,14 @@ async def _handle_tts(scope, receive, send):
                 print(f"[TTS] 500 from Google (attempt {attempt}/{TTS_RETRIES}), retrying in 1s…")
                 await asyncio.sleep(1)
         except Exception as e:
-            print(f"[TTS] unexpected error:\n{traceback.format_exc()}")
-            await _send_json(send, {"error": str(e)}, 500)
+            tb = traceback.format_exc()
+            # Return 429 directly so the extension knows to use its fallback voice
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                print(f"[TTS] quota exceeded — extension will fall back to chrome.tts")
+                await _send_json(send, {"error": "quota_exceeded"}, 429)
+            else:
+                print(f"[TTS] unexpected error:\n{tb}")
+                await _send_json(send, {"error": str(e)}, 500)
             return
 
     print(f"[TTS] all {TTS_RETRIES} attempts failed: {last_error}")
